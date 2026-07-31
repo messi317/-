@@ -19,25 +19,27 @@ jobs:
         with:
           node-version: 20
 
-      - name: Set up Java JDK 21
+      - name: Set up Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '21'
+          java-version: '17'
 
       - name: Prepare Web Directory & Install Capacitor
         run: |
           mkdir -p www
           cp -r * www/ 2>/dev/null || true
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core@5 @capacitor/cli@5 @capacitor/android@5
           npx cap init BattlePanic com.battlepanic.app --web-dir www
           npx cap add android
           npx cap sync android
 
-      - name: Build Android App
+      - name: Fix Kotlin Duplicate Classes & Build
         run: |
           cd android
+          echo "configurations.all { exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8' }" >> app/build.gradle
+          echo "configurations.all { exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7' }" >> app/build.gradle
           chmod +x gradlew
           ./gradlew assembleDebug
 
