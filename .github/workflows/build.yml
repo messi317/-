@@ -26,17 +26,19 @@ jobs:
       - name: Prepare Web Assets & Capacitor
         run: |
           mkdir www
-          cp -r index.html battlepanic.swf ruffle www/
+          cp -r index.html battlepanic.swf ruffle www/ || cp -r index.html www/
           npm init -y
-          npm install @capacitor/core@5 @capacitor/cli@5 @capacitor/android@5
+          npm install @capacitor/core@5 @capacitor/cli@5 @capacitor/android@5 @capacitor/filesystem@5
           npx cap init "Battle Panic" "com.game.battlepanic" --web-dir www
           npx cap add android
           npx cap copy android
 
-      - name: Fix Kotlin & Enable Persistent Storage
+      - name: Enable Hardware Acceleration & High Performance
         run: |
           echo "android.enableJetifier=true" >> android/gradle.properties
           echo "android.useAndroidX=true" >> android/gradle.properties
+          # تفعيل التسريع وتخفيف سلاسل الرسوميات
+          sed -i 's/<application/<application android:hardwareAccelerated="true" android:largeHeap="true"/g' android/app/src/main/AndroidManifest.xml
 
       - name: Build Android APK
         run: |
