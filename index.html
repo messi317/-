@@ -1,117 +1,164 @@
-<!DOCTYPE html>
-<html lang="ar">
+
+</body><!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Battle Panic</title>
-  <style>
-    html,body{height:100%;margin:0;background:#000}
-    #ruffle-container{width:100%;height:100%;display:flex;justify-content:center;align-items:center}
-  </style>
-  <script src="ruffle/ruffle.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Battle Panic</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transform: translateZ(0);
+            will-change: transform;
+        }
+        #ruffle-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        ruffle-player {
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+    <script src="ruffle/ruffle.js"></script>
+    <script src="capacitor.js"></script>
 </head>
 <body>
-  <div id="ruffle-container"></div>
+    <div id="ruffle-container"></div>
 
-  <script>
-  // ---------- واجهة تخزين موثوقة (Capacitor Storage مع fallback) ----------
-  async function storageSet(key, value) {
-    try {
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Storage) {
-        await window.Capacitor.Plugins.Storage.set({ key, value: String(value) });
-        return true;
-      } else {
-        localStorage.setItem(key, String(value));
-        return true;
-      }
-    } catch (e) {
-      try { localStorage.setItem(key, String(value)); } catch(e2){}
-      console.error('storageSet error', e);
-      return false;
-    }
-  }
+    <script>
+        // إجبار الشاشة على الوضع الأفقي
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(() => {});
+        }
 
-  async function storageGet(key) {
-    try {
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Storage) {
-        const res = await window.Capacitor.Plugins.Storage.get({ key });
-        return res && res.value ? res.value : null;
-      } else {
-        return localStorage.getItem(key);
-      }
-    } catch (e) {
-      console.error('storageGet error', e);
-      return localStorage.getItem(key);
-    }
-  }
+        window.RufflePlayer = window.RufflePlayer || {};
+        window.RufflePlayer.config = {
+            "autoplay": "on",
+            "unmuteOverlay": "hidden",
+            "letterbox": "on",
+            "openUrlMode": "confirm",
+            "playerVersion": 32,
+            "preferredRenderer": "webgl",
+            "quality": "high"
+        };
 
-  // ---------- منطق الحفظ والخروج ----------
-  window.currentLevel = 1;
+        const SAVE_FILE_NAME = 'battlepanic_save.json';
+        let isSaving = false;
 
-  // دالة عامة تُستدعى عند نهاية المرحلة
-  window.finishLevelAndExit = async function(level) {
-    try {
-      const lvl = parseInt(level) || window.currentLevel || 1;
-      console.log('finishLevelAndExit called with', lvl);
+        // 1. استرجاع بيانات الحفظ من مجلد Data عند تشغيل التطبيق
+        async function restoreFromDataFolder() {
+            try {
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                    const Filesystem = window.Capacitor.Plugins.Filesystem;
+                    const result = await Filesystem.readFile({
+                        path: SAVE_FILE_NAME,
+                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
+                        encoding: 'utf8'
+                    });
 
-      // حفظ فوري
-      await storageSet('battlepanic_level', lvl);
-      console.log('Saved level', lvl);
+                    if (result.data) {
+                        const savedData = JSON.parse(result.data);
+                        for (const key in savedData) {
+                            localStorage.setItem(key, savedData[key]);
+                        }
+                        console.log("Save loaded from Data directory successfully.");
+                    }
+                }
+            } catch (e) {
+                console.log("No previous save file found in Data folder.");
+            }
+        }
 
-      // اهتزاز قصير إن توفر
-      try { navigator.vibrate && navigator.vibrate(100); } catch(e){}
+        // 2. كتابة البيانات داخل مجلد Data
+        async function saveToDataFolder() {
+            if (isSaving) return;
+            isSaving = true;
 
-      // خروج آمن للتطبيق عبر Capacitor App plugin أو بديل
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App && window.Capacitor.Plugins.App.exitApp) {
-        window.Capacitor.Plugins.App.exitApp();
-      } else if (navigator.app && navigator.app.exitApp) {
-        navigator.app.exitApp();
-      } else {
-        // بديل داخل WebView: إعادة توجيه لصفحة menu داخل التطبيق
-        window.location.href = 'menu.html';
-      }
-    } catch (err) {
-      console.error('finishLevelAndExit error', err);
-      try { localStorage.setItem('battlepanic_level', String(level)); } catch(e){}
-      window.location.href = 'menu.html';
-    }
-  };
+            try {
+                const currentSave = {};
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key) {
+                        currentSave[key] = localStorage.getItem(key);
+                    }
+                }
 
-  // استرجاع التقدّم عند بدء اللعبة
-  (async () => {
-    const saved = await storageGet('battlepanic_level');
-    if (saved) {
-      window.currentLevel = parseInt(saved);
-      console.log('Restored level', window.currentLevel);
-    } else {
-      console.log('No saved level, start at', window.currentLevel);
-    }
-  })();
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                    const Filesystem = window.Capacitor.Plugins.Filesystem;
+                    await Filesystem.writeFile({
+                        path: SAVE_FILE_NAME,
+                        data: JSON.stringify(currentSave),
+                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
+                        encoding: 'utf8'
+                    });
+                    console.log("Saved to Data directory.");
+                }
+            } catch (e) {
+                console.error("Error writing to Data directory:", e);
+            } finally {
+                isSaving = false;
+            }
+        }
 
-  // حفظ احتياطي عند إخفاء الصفحة أو إغلاقها
-  window.addEventListener('beforeunload', async () => {
-    try { await storageSet('battlepanic_level', window.currentLevel); } catch(e){}
-  });
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'hidden') {
-      try { await storageSet('battlepanic_level', window.currentLevel); } catch(e){}
-    }
-  });
+        // 3. تشغيل محاكي Ruffle وإعداد المراقبة
+        window.addEventListener("load", async () => {
+            // تحميل البيانات المحفوظة سابقاً من مجلد Data أولاً
+            await restoreFromDataFolder();
 
-  // ---------- تهيئة Ruffle ----------
-  window.RufflePlayer = window.RufflePlayer || {};
-  window.RufflePlayer.config = { autoplay: "on", unmuteOverlay: "hidden", letterbox: "on" };
+            const ruffle = window.RufflePlayer.newest();
+            const player = ruffle.createPlayer();
+            const container = document.getElementById("ruffle-container");
+            container.appendChild(player);
 
-  window.addEventListener('load', () => {
-    const ruffle = window.RufflePlayer.newest();
-    const player = ruffle.createPlayer();
-    document.getElementById('ruffle-container').appendChild(player);
-    player.load({ url: 'battlepanic.swf', scale: 'showAll', forceScale: false });
+            player.load({
+                url: "battlepanic.swf",
+                scale: "showAll",
+                forceScale: true,
+                allowScriptAccess: true
+            });
 
-    // إن أردت اختبار الحفظ يدوياً من الويب:
-    // window.finishLevelAndExit(5);
-  });
-  </script>
+            // مراقبة الحفظ التلقائي بشكل مستمر
+            startAutoSaveLoop();
+        });
+
+        // 4. دالة الحفظ الدائم والتلقائي
+        function startAutoSaveLoop() {
+            // حفظ كل 3 ثواني
+            setInterval(() => {
+                saveToDataFolder();
+            }, 3000);
+
+            // حفظ فوراً عند إغلاق التطبيق أو الانتقال لتطبيق آخر
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    saveToDataFolder();
+                }
+            });
+
+            window.addEventListener('beforeunload', () => {
+                saveToDataFolder();
+            });
+        }
+    </script>
 </body>
+</html>
+
 </html>
  
