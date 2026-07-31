@@ -20,6 +20,8 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            transform: translateZ(0);
+            will-change: transform;
         }
         #ruffle-container {
             width: 100vw;
@@ -41,7 +43,7 @@
     <div id="ruffle-container"></div>
 
     <script>
-        // إجبار الوضع الأفقي
+        // إجبار الشاشة على الوضع الأفقي
         if (screen.orientation && screen.orientation.lock) {
             screen.orientation.lock('landscape').catch(() => {});
         }
@@ -54,9 +56,7 @@
             "openUrlMode": "confirm",
             "playerVersion": 32,
             "preferredRenderer": "webgl",
-            "quality": "high",
-            "scale": "showAll",
-            "forceScale": true
+            "quality": "high"
         };
 
         window.addEventListener("load", () => {
@@ -70,10 +70,6 @@
                 scale: "showAll",
                 forceScale: true,
                 allowScriptAccess: true
-            }).then(() => {
-                console.log("Game Loaded Successfully!");
-            }).catch((e) => {
-                console.error("Ruffle Load Error:", e);
             });
         });
     </script>
