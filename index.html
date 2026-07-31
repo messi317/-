@@ -1,23 +1,12 @@
 <!DOCTYPE html>
 <html lang="ar">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, maximum-scale=1.0, user-scalable=no">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Battle Panic</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%; height: 100%;
-      overflow: hidden; background-color: #000;
-      display: flex; justify-content: center; align-items: center;
-    }
-    #ruffle-container {
-      width: 100vw; height: 100vh;
-      display: flex; justify-content: center; align-items: center;
-    }
-    ruffle-player {
-      width: 100% !important; height: 100% !important;
-    }
+    html,body{height:100%;margin:0;background:#000}
+    #ruffle-container{width:100%;height:100%;display:flex;justify-content:center;align-items:center}
   </style>
   <script src="ruffle/ruffle.js"></script>
 </head>
@@ -25,42 +14,104 @@
   <div id="ruffle-container"></div>
 
   <script>
-    // إعداد Ruffle
-    window.RufflePlayer = window.RufflePlayer || {};
-    window.RufflePlayer.config = {
-      autoplay: "on",
-      unmuteOverlay: "hidden",
-      letterbox: "on"
-    };
-
-    window.addEventListener("load", () => {
-      const ruffle = window.RufflePlayer.newest();
-      const player = ruffle.createPlayer();
-      document.getElementById("ruffle-container").appendChild(player);
-      player.load({ url: "battlepanic.swf", scale: "showAll", forceScale: true });
-    });
-
-    // نظام الحفظ والخروج
-    let currentLevel = 1;
-
-    function finishLevel() {
-      // حفظ المرحلة
-      localStorage.setItem("battlepanic_level", currentLevel);
-      alert("تم حفظ المرحلة " + currentLevel);
-
-      // زيادة المرحلة
-      currentLevel++;
-
-      // الخروج من اللعبة (إعادة توجيه لصفحة رئيسية أو إغلاق)
-      window.location.href = "menu.html"; 
+  // ---------- واجهة تخزين موثوقة (Capacitor Storage مع fallback) ----------
+  async function storageSet(key, value) {
+    try {
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Storage) {
+        await window.Capacitor.Plugins.Storage.set({ key, value: String(value) });
+        return true;
+      } else {
+        localStorage.setItem(key, String(value));
+        return true;
+      }
+    } catch (e) {
+      try { localStorage.setItem(key, String(value)); } catch(e2){}
+      console.error('storageSet error', e);
+      return false;
     }
+  }
 
-    // استرجاع التقدّم عند بداية اللعبة
-    const savedLevel = localStorage.getItem("battlepanic_level");
-    if (savedLevel) {
-      currentLevel = parseInt(savedLevel);
-      console.log("تم استرجاع المرحلة:", currentLevel);
+  async function storageGet(key) {
+    try {
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Storage) {
+        const res = await window.Capacitor.Plugins.Storage.get({ key });
+        return res && res.value ? res.value : null;
+      } else {
+        return localStorage.getItem(key);
+      }
+    } catch (e) {
+      console.error('storageGet error', e);
+      return localStorage.getItem(key);
     }
+  }
+
+  // ---------- منطق الحفظ والخروج ----------
+  window.currentLevel = 1;
+
+  // دالة عامة تُستدعى عند نهاية المرحلة
+  window.finishLevelAndExit = async function(level) {
+    try {
+      const lvl = parseInt(level) || window.currentLevel || 1;
+      console.log('finishLevelAndExit called with', lvl);
+
+      // حفظ فوري
+      await storageSet('battlepanic_level', lvl);
+      console.log('Saved level', lvl);
+
+      // اهتزاز قصير إن توفر
+      try { navigator.vibrate && navigator.vibrate(100); } catch(e){}
+
+      // خروج آمن للتطبيق عبر Capacitor App plugin أو بديل
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App && window.Capacitor.Plugins.App.exitApp) {
+        window.Capacitor.Plugins.App.exitApp();
+      } else if (navigator.app && navigator.app.exitApp) {
+        navigator.app.exitApp();
+      } else {
+        // بديل داخل WebView: إعادة توجيه لصفحة menu داخل التطبيق
+        window.location.href = 'menu.html';
+      }
+    } catch (err) {
+      console.error('finishLevelAndExit error', err);
+      try { localStorage.setItem('battlepanic_level', String(level)); } catch(e){}
+      window.location.href = 'menu.html';
+    }
+  };
+
+  // استرجاع التقدّم عند بدء اللعبة
+  (async () => {
+    const saved = await storageGet('battlepanic_level');
+    if (saved) {
+      window.currentLevel = parseInt(saved);
+      console.log('Restored level', window.currentLevel);
+    } else {
+      console.log('No saved level, start at', window.currentLevel);
+    }
+  })();
+
+  // حفظ احتياطي عند إخفاء الصفحة أو إغلاقها
+  window.addEventListener('beforeunload', async () => {
+    try { await storageSet('battlepanic_level', window.currentLevel); } catch(e){}
+  });
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'hidden') {
+      try { await storageSet('battlepanic_level', window.currentLevel); } catch(e){}
+    }
+  });
+
+  // ---------- تهيئة Ruffle ----------
+  window.RufflePlayer = window.RufflePlayer || {};
+  window.RufflePlayer.config = { autoplay: "on", unmuteOverlay: "hidden", letterbox: "on" };
+
+  window.addEventListener('load', () => {
+    const ruffle = window.RufflePlayer.newest();
+    const player = ruffle.createPlayer();
+    document.getElementById('ruffle-container').appendChild(player);
+    player.load({ url: 'battlepanic.swf', scale: 'showAll', forceScale: false });
+
+    // إن أردت اختبار الحفظ يدوياً من الويب:
+    // window.finishLevelAndExit(5);
+  });
   </script>
 </body>
 </html>
+ 
