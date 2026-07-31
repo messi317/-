@@ -14,11 +14,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
       - name: Set up Java JDK
         uses: actions/setup-java@v4
         with:
@@ -27,11 +22,14 @@ jobs:
 
       - name: Build Android App
         run: |
-          if [ -f package.json ]; then npm install; fi
-          npx cap sync android || true
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          if [ -d "android" ]; then
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            echo "Error: android directory not found"
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
