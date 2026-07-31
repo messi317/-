@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
@@ -23,13 +23,15 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Capacitor & Build App
+      - name: Prepare Web Assets & Capacitor
         run: |
+          mkdir www
+          cp -r index.html battlepanic.swf ruffle www/
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "Battle Panic" "com.game.battlepanic" --web-dir .
+          npx cap init "Battle Panic" "com.game.battlepanic" --web-dir www
           npx cap add android
-          npx cap copy
+          npx cap copy android
 
       - name: Build Android APK
         run: |
