@@ -1,60 +1,177 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Battle Panic</title>
+    <title>Battle Panic - Optimized</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
         html, body {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        #ruffle-container {
             width: 100vw;
             height: 100vh;
+            background-color: #111;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
+            overflow: hidden;
+            /* تفعيل تسريع كرت الشاشة وتخفيف التقطيع */
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            will-change: transform;
         }
-        ruffle-player {
-            width: 100% !important;
-            height: 100% !important;
+        #game-card {
+            background: #222;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            width: 90%;
+            max-width: 400px;
+            will-change: transform, opacity;
         }
+        h1 { margin-bottom: 10px; font-size: 20px; color: #4CAF50; }
+        p { margin-bottom: 15px; font-size: 16px; }
+        .stars { font-size: 24px; margin-bottom: 15px; color: #FFD700; }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 18px;
+            font-size: 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 4px;
+            touch-action: manipulation;
+        }
+        button:active { transform: scale(0.96); }
+        .reset-btn { background: #f44336; }
     </style>
-    <script src="ruffle/ruffle.js"></script>
+
+    <script src="capacitor.js"></script>
 </head>
 <body>
-    <div id="ruffle-container"></div>
+
+    <div id="game-card">
+        <h1>Battle Panic (Save System)</h1>
+        <p id="level-display">جاري التحميل...</p>
+        <div id="stars-display" class="stars">⭐ 0 / 3</div>
+
+        <p>اختر نتيجة الفوز للمرحلة الحالية:</p>
+        <button onclick="onWin(1)">فوز: ⭐ (نجمة)</button>
+        <button onclick="onWin(2)">فوز: ⭐⭐ (نجمتين)</button>
+        <button onclick="onWin(3)">فوز: ⭐⭐⭐ (3 نجوم)</button>
+
+        <br><br>
+        <button class="reset-btn" onclick="resetSaveFile()">مسح ملف الـ Data 🔄</button>
+    </div>
 
     <script>
-        window.RufflePlayer = window.RufflePlayer || {};
-        window.RufflePlayer.config = {
-            "autoplay": "on",
-            "unmuteOverlay": "hidden",
-            "letterbox": "on"
+        let gameState = {
+            currentLevel: 1,
+            levelsProgress: {}
         };
 
-        window.addEventListener("load", (event) => {
-            const ruffle = window.RufflePlayer.newest();
-            const player = ruffle.createPlayer();
-            const container = document.getElementById("ruffle-container");
-            container.appendChild(player);
-            player.load({
-                url: "battlepanic.swf",
-                scale: "showAll",
-                forceScale: true
+        const FILE_NAME = 'savegame.json';
+
+        // دالة قراءة الملف بشكل غير متزامن لتجنب التقطيع عند فتح اللعبة
+        async function loadGameFromData() {
+            // استخدام requestAnimationFrame لضمان تحميل الواجهة أولاً دون تجميد الشاشة
+            requestAnimationFrame(async () => {
+                try {
+                    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                        const Filesystem = window.Capacitor.Plugins.Filesystem;
+                        const result = await Filesystem.readFile({
+                            path: FILE_NAME,
+                            directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
+                            encoding: 'utf8'
+                        });
+
+                        if (result.data) {
+                            gameState = JSON.parse(result.data);
+                        }
+                    } else {
+                        const localData = localStorage.getItem(FILE_NAME);
+                        if (localData) gameState = JSON.parse(localData);
+                    }
+                } catch (error) {
+                    console.log("لا يوجد ملف حفظ سابق.");
+                }
+                updateUI();
             });
-        });
+        }
+
+        async function onWin(starsEarned) {
+            const level = gameState.currentLevel;
+            gameState.levelsProgress[level] = starsEarned;
+            gameState.currentLevel++;
+
+            updateUI();
+
+            // حفظ الملف في الخلفية لتجنب تجميد الواجهة (Non-blocking I/O)
+            setTimeout(() => {
+                saveToAndroidData();
+            }, 50);
+        }
+
+        async function saveToAndroidData() {
+            const dataString = JSON.stringify(gameState);
+
+            try {
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                    const Filesystem = window.Capacitor.Plugins.Filesystem;
+
+                    await Filesystem.writeFile({
+                        path: FILE_NAME,
+                        data: dataString,
+                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
+                        encoding: 'utf8'
+                    });
+                } else {
+                    localStorage.setItem(FILE_NAME, dataString);
+                }
+            } catch (e) {
+                console.error("خطأ أثناء كتابة الملف:", e);
+            }
+        }
+
+        async function resetSaveFile() {
+            gameState = { currentLevel: 1, levelsProgress: {} };
+            try {
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                    const Filesystem = window.Capacitor.Plugins.Filesystem;
+                    await Filesystem.deleteFile({
+                        path: FILE_NAME,
+                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA'
+                    });
+                }
+                localStorage.removeItem(FILE_NAME);
+            } catch (e) {}
+            updateUI();
+        }
+
+        function updateUI() {
+            document.getElementById('level-display').innerText = "المرحلة الحالية: " + gameState.currentLevel;
+            
+            const lastLevel = gameState.currentLevel - 1;
+            const stars = gameState.levelsProgress[lastLevel] || 0;
+            
+            let starsText = "";
+            for(let i = 0; i < stars; i++) starsText += "⭐";
+            if(stars === 0) starsText = "لا توجد نجوم بعد";
+            
+            document.getElementById('stars-display').innerText = "نجوم المرحلة السابقة: " + starsText;
+        }
+
+        document.addEventListener("DOMContentLoaded", loadGameFromData);
     </script>
 </body>
 </html>
