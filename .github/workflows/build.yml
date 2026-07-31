@@ -1,60 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Battle Panic</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        html, body {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        #ruffle-container {
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        ruffle-player {
-            width: 100% !important;
-            height: 100% !important;
-        }
-    </style>
-    <script src="ruffle/ruffle.js"></script>
-</head>
-<body>
-    <div id="ruffle-container"></div>
+name: Build Android APK
 
-    <script>
-        window.RufflePlayer = window.RufflePlayer || {};
-        window.RufflePlayer.config = {
-            "autoplay": "on",
-            "unmuteOverlay": "hidden",
-            "letterbox": "on"
-        };
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
 
-        window.addEventListener("load", (event) => {
-            const ruffle = window.RufflePlayer.newest();
-            const player = ruffle.createPlayer();
-            const container = document.getElementById("ruffle-container");
-            container.appendChild(player);
-            player.load({
-                url: "battlepanic.swf",
-                scale: "showAll",
-                forceScale: true
-            });
-        });
-    </script>
-</body>
-</html>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Prepare Web Assets & Capacitor
+        run: |
+          mkdir www
+          cp -r index.html battlepanic.swf ruffle www/
+          npm init -y
+          npm install @capacitor/core@5 @capacitor/cli@5 @capacitor/android@5
+          npx cap init "Battle Panic" "com.game.battlepanic" --web-dir www
+          npx cap add android
+          npx cap copy android
+
+      - name: Fix Kotlin & Enable Persistent Storage
+        run: |
+          echo "android.enableJetifier=true" >> android/gradle.properties
+          echo "android.useAndroidX=true" >> android/gradle.properties
+
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Battle-Panic-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+ 
