@@ -2,40 +2,50 @@ name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Set up Java JDK
+      - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Sync and Build Android
+      - name: Prepare Web Assets & Capacitor
         run: |
-          npm install
-          npx cap add android || true
-          npx cap sync android
+          mkdir www
+          cp -r index.html battlepanic.swf ruffle www/
+          npm init -y
+          npm install @capacitor/core@5 @capacitor/cli@5 @capacitor/android@5
+          npx cap init "Battle Panic" "com.game.battlepanic" --web-dir www
+          npx cap add android
+          npx cap copy android
+
+      - name: Fix Kotlin & Enable Persistent Storage
+        run: |
+          echo "android.enableJetifier=true" >> android/gradle.properties
+          echo "android.useAndroidX=true" >> android/gradle.properties
+
+      - name: Build Android APK
+        run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BattlePanic-APK
+          name: Battle-Panic-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
