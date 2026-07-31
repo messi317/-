@@ -20,7 +20,6 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            /* تسريع رسومي كامل لإزالة التقطيع */
             transform: translateZ(0);
             will-change: transform;
         }
@@ -30,10 +29,20 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            transform: translateZ(0);
+            will-change: transform;
         }
         ruffle-player {
             width: 100% !important;
             height: 100% !important;
+            contain: layout style paint;
+        }
+        ::-webkit-scrollbar {
+            display: none;
+        }
+        body {
+            overscroll-behavior: none;
+            touch-action: none;
         }
     </style>
     <script src="ruffle/ruffle.js"></script>
@@ -43,7 +52,14 @@
     <div id="ruffle-container"></div>
 
     <script>
-        // إعدادات Ruffle الأصلية مع تفعيل WebGL للأداء العالي
+        // إجبار الشاشة على الوضع الأفقي إذا يدعمه المتصفح
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(() => {});
+        }
+
+        // ============== كشف قوة الجهاز لتحديد الإعدادات المناسبة ==============
+        const deviceInfo = detectDevicePerformance();
+
         window.RufflePlayer = window.RufflePlayer || {};
         window.RufflePlayer.config = {
             "autoplay": "on",
@@ -52,12 +68,29 @@
             "openUrlMode": "confirm",
             "playerVersion": 32,
             "preferredRenderer": "webgl",
-            "quality": "high"
+            "quality": deviceInfo.quality,
+            "logLevel": "error",
+            "compatibilityRules": false,
+            "warnOnUnsupportedContent": false,
+            "splashScreen": false,
+            "preloader": false,
+            "maxExecutionDuration": 30,
+            "backgroundExecutionMode": "pause"
         };
 
         let player;
+        let lastSaveData = "";
 
         window.addEventListener("load", () => {
+            // استخدام requestIdleCallback لتقليل الضغط عند التحميل
+            if ('requestIdleCallback' in window) {
+                requestIdleCallback(initRuffle, { timeout: 100 });
+            } else {
+                setTimeout(initRuffle, 0);
+            }
+        });
+
+        function initRuffle() {
             const ruffle = window.RufflePlayer.newest();
             player = ruffle.createPlayer();
             const container = document.getElementById("ruffle-container");
@@ -70,14 +103,35 @@
                 allowScriptAccess: true
             });
 
-            // استعادة وتزامن الحفظ مع مجلد Android/data
             restoreDataSave();
             startAutoSaveToData();
-        });
+            watchLocalStorageChanges();
+        }
 
+        // ============== كشف قوة الجهاز ==============
+        function detectDevicePerformance() {
+            const cores = navigator.hardwareConcurrency || 2;
+            const memory = navigator.deviceMemory || 4;
+            const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+
+            // جهاز قوي (8+ cores أو 8+ GB RAM)
+            if (cores >= 8 && memory >= 8) {
+                return { quality: "high", tier: "high", frameLimit: 60 };
+            }
+            // جهاز متوسط (4-7 cores أو 4-7 GB RAM)
+            else if (cores >= 4 && memory >= 4) {
+                return { quality: "medium", tier: "medium", frameLimit: 60 };
+            }
+            // جهاز ضعيف
+            else {
+                return { quality: "low", tier: "low", frameLimit: 30 };
+            }
+        }
+
+        // ============== حفظ واسترجاع البيانات ==============
         const SAVE_FILE_NAME = 'battlepanic_save.json';
+        let isSaving = false;
 
-        // استرجاع الحفظ من مجلد Data عند تشغيل اللعبة
         async function restoreDataSave() {
             try {
                 if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
@@ -93,38 +147,135 @@
                         for (const key in savedData) {
                             localStorage.setItem(key, savedData[key]);
                         }
+                        console.log("Save restored:", Object.keys(savedData).length, "keys");
                     }
+                } else {
+                    console.log("Capacitor Filesystem not available, using localStorage only.");
                 }
             } catch (e) {
                 console.log("No existing save file in Data directory yet.");
             }
         }
 
-        // حفظ التقدم تلقائياً في مجلد Android/data فور إكمال المرحلة
+        // ============== مراقبة تغييرات localStorage ==============
+        function watchLocalStorageChanges() {
+            // Override localStorage.setItem لحفظ فوري
+            const originalSetItem = localStorage.setItem.bind(localStorage);
+            localStorage.setItem = function(key, value) {
+                originalSetItem(key, value);
+                debouncedSave();
+            };
+
+            // Override localStorage.removeItem
+            const originalRemoveItem = localStorage.removeItem.bind(localStorage);
+            localStorage.removeItem = function(key) {
+                originalRemoveItem(key);
+                debouncedSave();
+            };
+
+            // Override localStorage.clear
+            const originalClear = localStorage.clear.bind(localStorage);
+            localStorage.clear = function() {
+                originalClear();
+                debouncedSave();
+            };
+        }
+
+        // Debounce للحفظ (يمنع الحفظ المتكرر)
+        let saveTimeout = null;
+        function debouncedSave() {
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                saveToData();
+            }, 500);
+        }
+
+        // ============== الحفظ التلقائي ==============
         function startAutoSaveToData() {
-            setInterval(async () => {
-                try {
-                    const currentSave = {};
-                    for (let i = 0; i < localStorage.length; i++) {
-                        const key = localStorage.key(i);
+            // حفظ دوري كل 5 ثوانٍ كضمان إضافي
+            setInterval(() => {
+                if (!isSaving) {
+                    saveToData();
+                }
+            }, 5000);
+
+            // حفظ فوري عند إيقاف تشغيل الصفحة
+            window.addEventListener('beforeunload', () => {
+                saveToData();
+            });
+
+            // حفظ عند تغير حالة الرؤية (فتح/إغلاق التطبيق)
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    saveToData();
+                }
+            });
+        }
+
+        async function saveToData() {
+            if (isSaving) return;
+            isSaving = true;
+
+            try {
+                const currentSave = {};
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key) {
                         currentSave[key] = localStorage.getItem(key);
                     }
-
-                    if (Object.keys(currentSave).length > 0 && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
-                        const Filesystem = window.Capacitor.Plugins.Filesystem;
-                        await Filesystem.writeFile({
-                            path: SAVE_FILE_NAME,
-                            data: JSON.stringify(currentSave),
-                            directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
-                            encoding: 'utf8'
-                        });
-                    }
-                } catch (e) {
-                    console.error("Auto save to Data error:", e);
                 }
-            }, 3000);
+
+                const saveString = JSON.stringify(currentSave);
+
+                // تحقق إذا البيانات تغيرت فعلا
+                if (saveString === lastSaveData) {
+                    isSaving = false;
+                    return;
+                }
+
+                if (Object.keys(currentSave).length > 0 && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                    const Filesystem = window.Capacitor.Plugins.Filesystem;
+                    await Filesystem.writeFile({
+                        path: SAVE_FILE_NAME,
+                        data: saveString,
+                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
+                        encoding: 'utf8'
+                    });
+                    lastSaveData = saveString;
+                }
+            } catch (e) {
+                console.error("Auto save error:", e);
+            } finally {
+                isSaving = false;
+            }
         }
+
+        // ============== تحسينات إضافية للأداء ==============
+        // منع السحب والتكبير على الموبايل
+        document.addEventListener('gesturestart', (e) => e.preventDefault());
+        document.addEventListener('gesturechange', (e) => e.preventDefault());
+        document.addEventListener('gestureend', (e) => e.preventDefault());
+
+        // تحسين سرعة الاستجابة لللمس
+        let touchStartX = 0;
+        let touchStartY = 0;
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        document.addEventListener('touchmove', (e) => {
+            const touchEndX = e.touches[0].clientX;
+            const touchEndY = e.touches[0].clientY;
+            const diffX = Math.abs(touchEndX - touchStartX);
+            const diffY = Math.abs(touchEndY - touchStartY);
+
+            // منع السحب الأفقي فقط
+            if (diffX > diffY && diffX > 10) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
     </script>
 </body>
 </html>
-
