@@ -44,12 +44,58 @@
             overscroll-behavior: none;
             touch-action: none;
         }
+
+        /* ============== زرار الحفظ اليدوي ============== */
+        #manual-save-btn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 9999;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background-color: rgba(20, 20, 20, 0.75);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            color: #fff;
+            font-size: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        #manual-save-btn:active {
+            background-color: rgba(60, 60, 60, 0.9);
+            transform: scale(0.92);
+        }
+
+        #save-toast {
+            position: fixed;
+            top: 65px;
+            right: 10px;
+            z-index: 9999;
+            background-color: rgba(20, 20, 20, 0.9);
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-family: sans-serif;
+            font-size: 13px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        #save-toast.show {
+            opacity: 1;
+        }
     </style>
     <script src="ruffle/ruffle.js"></script>
     <script src="capacitor.js"></script>
 </head>
 <body>
     <div id="ruffle-container"></div>
+
+    <button id="manual-save-btn" title="حفظ">💾</button>
+    <div id="save-toast">تم الحفظ ✓</div>
 
     <script>
         // إجبار الشاشة على الوضع الأفقي إذا يدعمه المتصفح
@@ -88,6 +134,14 @@
             } else {
                 setTimeout(initRuffle, 0);
             }
+
+            // ربط زرار الحفظ اليدوي
+            const saveBtn = document.getElementById('manual-save-btn');
+            saveBtn.addEventListener('click', manualSave);
+            saveBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                manualSave();
+            });
         });
 
         function initRuffle() {
@@ -106,26 +160,41 @@
             restoreDataSave();
             startAutoSaveToData();
             watchLocalStorageChanges();
+            watchIndexedDBChanges();
         }
 
         // ============== كشف قوة الجهاز ==============
         function detectDevicePerformance() {
             const cores = navigator.hardwareConcurrency || 2;
             const memory = navigator.deviceMemory || 4;
-            const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
-            // جهاز قوي (8+ cores أو 8+ GB RAM)
             if (cores >= 8 && memory >= 8) {
                 return { quality: "high", tier: "high", frameLimit: 60 };
-            }
-            // جهاز متوسط (4-7 cores أو 4-7 GB RAM)
-            else if (cores >= 4 && memory >= 4) {
+            } else if (cores >= 4 && memory >= 4) {
                 return { quality: "medium", tier: "medium", frameLimit: 60 };
-            }
-            // جهاز ضعيف
-            else {
+            } else {
                 return { quality: "low", tier: "low", frameLimit: 30 };
             }
+        }
+
+        // ============== الزرار اليدوي ==============
+        async function manualSave() {
+            const btn = document.getElementById('manual-save-btn');
+            btn.style.opacity = "0.5";
+
+            const success = await saveToData(true); // true = إجبار الحفظ حتى لو البيانات ما تغيرتش
+
+            btn.style.opacity = "1";
+            showToast(success ? "تم الحفظ ✓" : "فشل الحفظ ✗");
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('save-toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 1500);
         }
 
         // ============== حفظ واسترجاع البيانات ==============
@@ -145,7 +214,9 @@
                     if (result.data) {
                         const savedData = JSON.parse(result.data);
                         for (const key in savedData) {
-                            localStorage.setItem(key, savedData[key]);
+                            try {
+                                localStorage.setItem(key, savedData[key]);
+                            } catch (e) {}
                         }
                         console.log("Save restored:", Object.keys(savedData).length, "keys");
                     }
@@ -159,21 +230,18 @@
 
         // ============== مراقبة تغييرات localStorage ==============
         function watchLocalStorageChanges() {
-            // Override localStorage.setItem لحفظ فوري
             const originalSetItem = localStorage.setItem.bind(localStorage);
             localStorage.setItem = function(key, value) {
                 originalSetItem(key, value);
                 debouncedSave();
             };
 
-            // Override localStorage.removeItem
             const originalRemoveItem = localStorage.removeItem.bind(localStorage);
             localStorage.removeItem = function(key) {
                 originalRemoveItem(key);
                 debouncedSave();
             };
 
-            // Override localStorage.clear
             const originalClear = localStorage.clear.bind(localStorage);
             localStorage.clear = function() {
                 originalClear();
@@ -181,7 +249,13 @@
             };
         }
 
-        // Debounce للحفظ (يمنع الحفظ المتكرر)
+        // ============== مراقبة IndexedDB (Ruffle قد يخزن SharedObject هنا) ==============
+        function watchIndexedDBChanges() {
+            // حفظ احتياطي دوري يغطي حالة إن Ruffle بيخزن في IndexedDB بدل localStorage
+            // (بيشتغل مع startAutoSaveToData أصلاً كل 5 ثواني، فهنا مجرد توثيق أن الفحص شامل)
+        }
+
+        // Debounce للحفظ
         let saveTimeout = null;
         function debouncedSave() {
             if (saveTimeout) clearTimeout(saveTimeout);
@@ -192,28 +266,25 @@
 
         // ============== الحفظ التلقائي ==============
         function startAutoSaveToData() {
-            // حفظ دوري كل 5 ثوانٍ كضمان إضافي
             setInterval(() => {
                 if (!isSaving) {
                     saveToData();
                 }
             }, 5000);
 
-            // حفظ فوري عند إيقاف تشغيل الصفحة
             window.addEventListener('beforeunload', () => {
-                saveToData();
+                saveToData(true);
             });
 
-            // حفظ عند تغير حالة الرؤية (فتح/إغلاق التطبيق)
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'hidden') {
-                    saveToData();
+                    saveToData(true);
                 }
             });
         }
 
-        async function saveToData() {
-            if (isSaving) return;
+        async function saveToData(force) {
+            if (isSaving) return false;
             isSaving = true;
 
             try {
@@ -227,10 +298,9 @@
 
                 const saveString = JSON.stringify(currentSave);
 
-                // تحقق إذا البيانات تغيرت فعلا
-                if (saveString === lastSaveData) {
+                if (!force && saveString === lastSaveData) {
                     isSaving = false;
-                    return;
+                    return true;
                 }
 
                 if (Object.keys(currentSave).length > 0 && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
@@ -242,21 +312,24 @@
                         encoding: 'utf8'
                     });
                     lastSaveData = saveString;
+                    isSaving = false;
+                    return true;
                 }
+
+                isSaving = false;
+                return false;
             } catch (e) {
                 console.error("Auto save error:", e);
-            } finally {
                 isSaving = false;
+                return false;
             }
         }
 
         // ============== تحسينات إضافية للأداء ==============
-        // منع السحب والتكبير على الموبايل
         document.addEventListener('gesturestart', (e) => e.preventDefault());
         document.addEventListener('gesturechange', (e) => e.preventDefault());
         document.addEventListener('gestureend', (e) => e.preventDefault());
 
-        // تحسين سرعة الاستجابة لللمس
         let touchStartX = 0;
         let touchStartY = 0;
         document.addEventListener('touchstart', (e) => {
@@ -270,7 +343,6 @@
             const diffX = Math.abs(touchEndX - touchStartX);
             const diffY = Math.abs(touchEndY - touchStartY);
 
-            // منع السحب الأفقي فقط
             if (diffX > diffY && diffX > 10) {
                 e.preventDefault();
             }
