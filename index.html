@@ -20,8 +20,6 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            transform: translateZ(0);
-            will-change: transform;
         }
         #ruffle-container {
             width: 100vw;
@@ -29,82 +27,24 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            transform: translateZ(0);
-            will-change: transform;
         }
         ruffle-player {
             width: 100% !important;
             height: 100% !important;
-            contain: layout style paint;
-        }
-        ::-webkit-scrollbar {
-            display: none;
-        }
-        body {
-            overscroll-behavior: none;
-            touch-action: none;
-        }
-
-        /* ============== زرار الحفظ اليدوي ============== */
-        #manual-save-btn {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 9999;
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            background-color: rgba(20, 20, 20, 0.75);
-            border: 2px solid rgba(255, 255, 255, 0.6);
-            color: #fff;
-            font-size: 22px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            touch-action: manipulation;
-        }
-        #manual-save-btn:active {
-            background-color: rgba(60, 60, 60, 0.9);
-            transform: scale(0.92);
-        }
-
-        #save-toast {
-            position: fixed;
-            top: 65px;
-            right: 10px;
-            z-index: 9999;
-            background-color: rgba(20, 20, 20, 0.9);
-            color: #fff;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-family: sans-serif;
-            font-size: 13px;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
-        #save-toast.show {
-            opacity: 1;
         }
     </style>
     <script src="ruffle/ruffle.js"></script>
     <script src="capacitor.js"></script>
 </head>
 <body>
+
     <div id="ruffle-container"></div>
 
-    <button id="manual-save-btn" title="حفظ">💾</button>
-    <div id="save-toast">تم الحفظ ✓</div>
-
     <script>
-        // إجبار الشاشة على الوضع الأفقي إذا يدعمه المتصفح
+        // إجبار الوضع الأفقي
         if (screen.orientation && screen.orientation.lock) {
             screen.orientation.lock('landscape').catch(() => {});
         }
-
-        // ============== كشف قوة الجهاز لتحديد الإعدادات المناسبة ==============
-        const deviceInfo = detectDevicePerformance();
 
         window.RufflePlayer = window.RufflePlayer || {};
         window.RufflePlayer.config = {
@@ -114,39 +54,14 @@
             "openUrlMode": "confirm",
             "playerVersion": 32,
             "preferredRenderer": "webgl",
-            "quality": deviceInfo.quality,
-            "logLevel": "error",
-            "compatibilityRules": false,
-            "warnOnUnsupportedContent": false,
-            "splashScreen": false,
-            "preloader": false,
-            "maxExecutionDuration": 30,
-            "backgroundExecutionMode": "pause"
+            "quality": "high",
+            "scale": "showAll",
+            "forceScale": true
         };
 
-        let player;
-        let lastSaveData = "";
-
         window.addEventListener("load", () => {
-            // استخدام requestIdleCallback لتقليل الضغط عند التحميل
-            if ('requestIdleCallback' in window) {
-                requestIdleCallback(initRuffle, { timeout: 100 });
-            } else {
-                setTimeout(initRuffle, 0);
-            }
-
-            // ربط زرار الحفظ اليدوي
-            const saveBtn = document.getElementById('manual-save-btn');
-            saveBtn.addEventListener('click', manualSave);
-            saveBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                manualSave();
-            });
-        });
-
-        function initRuffle() {
             const ruffle = window.RufflePlayer.newest();
-            player = ruffle.createPlayer();
+            const player = ruffle.createPlayer();
             const container = document.getElementById("ruffle-container");
             container.appendChild(player);
 
@@ -155,199 +70,12 @@
                 scale: "showAll",
                 forceScale: true,
                 allowScriptAccess: true
+            }).then(() => {
+                console.log("Game Loaded Successfully!");
+            }).catch((e) => {
+                console.error("Ruffle Load Error:", e);
             });
-
-            restoreDataSave();
-            startAutoSaveToData();
-            watchLocalStorageChanges();
-            watchIndexedDBChanges();
-        }
-
-        // ============== كشف قوة الجهاز ==============
-        function detectDevicePerformance() {
-            const cores = navigator.hardwareConcurrency || 2;
-            const memory = navigator.deviceMemory || 4;
-
-            if (cores >= 8 && memory >= 8) {
-                return { quality: "high", tier: "high", frameLimit: 60 };
-            } else if (cores >= 4 && memory >= 4) {
-                return { quality: "medium", tier: "medium", frameLimit: 60 };
-            } else {
-                return { quality: "low", tier: "low", frameLimit: 30 };
-            }
-        }
-
-        // ============== الزرار اليدوي ==============
-        async function manualSave() {
-            const btn = document.getElementById('manual-save-btn');
-            btn.style.opacity = "0.5";
-
-            const success = await saveToData(true); // true = إجبار الحفظ حتى لو البيانات ما تغيرتش
-
-            btn.style.opacity = "1";
-            showToast(success ? "تم الحفظ ✓" : "فشل الحفظ ✗");
-        }
-
-        function showToast(message) {
-            const toast = document.getElementById('save-toast');
-            toast.textContent = message;
-            toast.classList.add('show');
-            setTimeout(() => {
-                toast.classList.remove('show');
-            }, 1500);
-        }
-
-        // ============== حفظ واسترجاع البيانات ==============
-        const SAVE_FILE_NAME = 'battlepanic_save.json';
-        let isSaving = false;
-
-        async function restoreDataSave() {
-            try {
-                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
-                    const Filesystem = window.Capacitor.Plugins.Filesystem;
-                    const result = await Filesystem.readFile({
-                        path: SAVE_FILE_NAME,
-                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
-                        encoding: 'utf8'
-                    });
-
-                    if (result.data) {
-                        const savedData = JSON.parse(result.data);
-                        for (const key in savedData) {
-                            try {
-                                localStorage.setItem(key, savedData[key]);
-                            } catch (e) {}
-                        }
-                        console.log("Save restored:", Object.keys(savedData).length, "keys");
-                    }
-                } else {
-                    console.log("Capacitor Filesystem not available, using localStorage only.");
-                }
-            } catch (e) {
-                console.log("No existing save file in Data directory yet.");
-            }
-        }
-
-        // ============== مراقبة تغييرات localStorage ==============
-        function watchLocalStorageChanges() {
-            const originalSetItem = localStorage.setItem.bind(localStorage);
-            localStorage.setItem = function(key, value) {
-                originalSetItem(key, value);
-                debouncedSave();
-            };
-
-            const originalRemoveItem = localStorage.removeItem.bind(localStorage);
-            localStorage.removeItem = function(key) {
-                originalRemoveItem(key);
-                debouncedSave();
-            };
-
-            const originalClear = localStorage.clear.bind(localStorage);
-            localStorage.clear = function() {
-                originalClear();
-                debouncedSave();
-            };
-        }
-
-        // ============== مراقبة IndexedDB (Ruffle قد يخزن SharedObject هنا) ==============
-        function watchIndexedDBChanges() {
-            // حفظ احتياطي دوري يغطي حالة إن Ruffle بيخزن في IndexedDB بدل localStorage
-            // (بيشتغل مع startAutoSaveToData أصلاً كل 5 ثواني، فهنا مجرد توثيق أن الفحص شامل)
-        }
-
-        // Debounce للحفظ
-        let saveTimeout = null;
-        function debouncedSave() {
-            if (saveTimeout) clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => {
-                saveToData();
-            }, 500);
-        }
-
-        // ============== الحفظ التلقائي ==============
-        function startAutoSaveToData() {
-            setInterval(() => {
-                if (!isSaving) {
-                    saveToData();
-                }
-            }, 5000);
-
-            window.addEventListener('beforeunload', () => {
-                saveToData(true);
-            });
-
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') {
-                    saveToData(true);
-                }
-            });
-        }
-
-        async function saveToData(force) {
-            if (isSaving) return false;
-            isSaving = true;
-
-            try {
-                const currentSave = {};
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (key) {
-                        currentSave[key] = localStorage.getItem(key);
-                    }
-                }
-
-                const saveString = JSON.stringify(currentSave);
-
-                if (!force && saveString === lastSaveData) {
-                    isSaving = false;
-                    return true;
-                }
-
-                if (Object.keys(currentSave).length > 0 && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
-                    const Filesystem = window.Capacitor.Plugins.Filesystem;
-                    await Filesystem.writeFile({
-                        path: SAVE_FILE_NAME,
-                        data: saveString,
-                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
-                        encoding: 'utf8'
-                    });
-                    lastSaveData = saveString;
-                    isSaving = false;
-                    return true;
-                }
-
-                isSaving = false;
-                return false;
-            } catch (e) {
-                console.error("Auto save error:", e);
-                isSaving = false;
-                return false;
-            }
-        }
-
-        // ============== تحسينات إضافية للأداء ==============
-        document.addEventListener('gesturestart', (e) => e.preventDefault());
-        document.addEventListener('gesturechange', (e) => e.preventDefault());
-        document.addEventListener('gestureend', (e) => e.preventDefault());
-
-        let touchStartX = 0;
-        let touchStartY = 0;
-        document.addEventListener('touchstart', (e) => {
-            touchStartX = e.touches[0].clientX;
-            touchStartY = e.touches[0].clientY;
-        }, { passive: true });
-
-        document.addEventListener('touchmove', (e) => {
-            const touchEndX = e.touches[0].clientX;
-            const touchEndY = e.touches[0].clientY;
-            const diffX = Math.abs(touchEndX - touchStartX);
-            const diffY = Math.abs(touchEndY - touchStartY);
-
-            if (diffX > diffY && diffX > 10) {
-                e.preventDefault();
-            }
-        }, { passive: false });
-
+        });
     </script>
 </body>
 </html>
