@@ -1,5 +1,4 @@
-
-</body><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -35,15 +34,47 @@
             width: 100% !important;
             height: 100% !important;
         }
+        /* شريط أزرار التحكم العلوي */
+        .save-bar {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            z-index: 99999;
+            display: flex;
+            gap: 6px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 4px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .save-btn {
+            background: #222;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 5px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .save-btn:active {
+            background: #444;
+        }
     </style>
     <script src="ruffle/ruffle.js"></script>
     <script src="capacitor.js"></script>
 </head>
 <body>
+
+    <!-- أزرار الحفظ والاسترجاع المباشرة لمجلد Data -->
+    <div class="save-bar">
+        <button class="save-btn" onclick="saveSaveFileToData()">حفظ في Data 📥</button>
+        <button class="save-btn" onclick="loadSaveFileFromData()">استرجاع من Data 🔄</button>
+    </div>
+
     <div id="ruffle-container"></div>
 
     <script>
-        // إجبار الشاشة على الوضع الأفقي
         if (screen.orientation && screen.orientation.lock) {
             screen.orientation.lock('landscape').catch(() => {});
         }
@@ -60,37 +91,26 @@
         };
 
         const SAVE_FILE_NAME = 'battlepanic_save.json';
-        let isSaving = false;
 
-        // 1. استرجاع بيانات الحفظ من مجلد Data عند تشغيل التطبيق
-        async function restoreFromDataFolder() {
-            try {
-                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
-                    const Filesystem = window.Capacitor.Plugins.Filesystem;
-                    const result = await Filesystem.readFile({
-                        path: SAVE_FILE_NAME,
-                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
-                        encoding: 'utf8'
-                    });
+        window.addEventListener("load", async () => {
+            // استرجاع ملف الحفظ تلقائياً من مجلد Data عند التشغيل
+            await loadSaveFileFromData(true);
 
-                    if (result.data) {
-                        const savedData = JSON.parse(result.data);
-                        for (const key in savedData) {
-                            localStorage.setItem(key, savedData[key]);
-                        }
-                        console.log("Save loaded from Data directory successfully.");
-                    }
-                }
-            } catch (e) {
-                console.log("No previous save file found in Data folder.");
-            }
-        }
+            const ruffle = window.RufflePlayer.newest();
+            const player = ruffle.createPlayer();
+            const container = document.getElementById("ruffle-container");
+            container.appendChild(player);
 
-        // 2. كتابة البيانات داخل مجلد Data
-        async function saveToDataFolder() {
-            if (isSaving) return;
-            isSaving = true;
+            player.load({
+                url: "battlepanic.swf",
+                scale: "showAll",
+                forceScale: true,
+                allowScriptAccess: true
+            });
+        });
 
+        // 1. عند الضغط على "حفظ في Data": يتم أخذ نسخة من تقدم اللعبة وكتابته بملف داخل مجلد Data
+        async function saveSaveFileToData() {
             try {
                 const currentSave = {};
                 for (let i = 0; i < localStorage.length; i++) {
@@ -108,57 +128,39 @@
                         directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
                         encoding: 'utf8'
                     });
-                    console.log("Saved to Data directory.");
+                    alert("تم تنزيل وحفظ ملف التقدم داخل مجلد Data بنجاح! 📥");
+                } else {
+                    alert("تم الحفظ في ذاكرة التطبيق المحلية! 💾");
                 }
             } catch (e) {
-                console.error("Error writing to Data directory:", e);
-            } finally {
-                isSaving = false;
+                console.error("خطأ أثناء الحفظ:", e);
+                alert("حدث خطأ أثناء تنزيل ملف الحفظ!");
             }
         }
 
-        // 3. تشغيل محاكي Ruffle وإعداد المراقبة
-        window.addEventListener("load", async () => {
-            // تحميل البيانات المحفوظة سابقاً من مجلد Data أولاً
-            await restoreFromDataFolder();
+        // 2. قراءة ملف الحفظ من مجلد Data واسترجاعه
+        async function loadSaveFileFromData(silent = false) {
+            try {
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+                    const Filesystem = window.Capacitor.Plugins.Filesystem;
+                    const result = await Filesystem.readFile({
+                        path: SAVE_FILE_NAME,
+                        directory: Filesystem.Directory ? Filesystem.Directory.Data : 'DATA',
+                        encoding: 'utf8'
+                    });
 
-            const ruffle = window.RufflePlayer.newest();
-            const player = ruffle.createPlayer();
-            const container = document.getElementById("ruffle-container");
-            container.appendChild(player);
-
-            player.load({
-                url: "battlepanic.swf",
-                scale: "showAll",
-                forceScale: true,
-                allowScriptAccess: true
-            });
-
-            // مراقبة الحفظ التلقائي بشكل مستمر
-            startAutoSaveLoop();
-        });
-
-        // 4. دالة الحفظ الدائم والتلقائي
-        function startAutoSaveLoop() {
-            // حفظ كل 3 ثواني
-            setInterval(() => {
-                saveToDataFolder();
-            }, 3000);
-
-            // حفظ فوراً عند إغلاق التطبيق أو الانتقال لتطبيق آخر
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') {
-                    saveToDataFolder();
+                    if (result.data) {
+                        const savedData = JSON.parse(result.data);
+                        for (const key in savedData) {
+                            localStorage.setItem(key, savedData[key]);
+                        }
+                        if (!silent) alert("تم استرجاع التقدم من مجلد Data بنجاح! 🔄");
+                    }
                 }
-            });
-
-            window.addEventListener('beforeunload', () => {
-                saveToDataFolder();
-            });
+            } catch (e) {
+                if (!silent) alert("لم يتم العثور على ملف حفظ سابق في مجلد Data!");
+            }
         }
     </script>
 </body>
 </html>
-
-</html>
- 
